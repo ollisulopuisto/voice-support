@@ -129,10 +129,8 @@ blueprint:
               multiline: false
               multiple: true
           default:
-          # Muoto: "soita levy <levyn nimi> yhtyeeltä <yhtyeen nimi>"
           - (sekoita|toista|kuuntele|soita) [ ](albumi|levy) {media_name} [(artistilta|bändiltä|yhtyeeltä)
             {artist}] [(huoneessa|soittimella|laitteella) {area_or_player_name}][ radiotilassa]
-          # Muoto: "soita bändin <yhtyeen nimi> levy <levyn nimi>"
           - (sekoita|toista|kuuntele|soita) [ ](artistin|bändin|yhtyeen) {artist} (albumi|levy)
             {media_name} [(huoneessa|soittimella|laitteella) {area_or_player_name}][ radiotilassa]
         track_trigger:
@@ -143,10 +141,8 @@ blueprint:
               multiline: false
               multiple: true
           default:
-          # Muoto: "soita kappale <kappaleen nimi> artistilta <artistin nimi>"
           - (sekoita|toista|kuuntele|soita) [ ](kappale|biisi|laulu) {media_name} [(artistilta|bändiltä|yhtyeeltä)
             {artist}] [(huoneessa|soittimella|laitteella) {area_or_player_name}][ radiotilassa]
-          # Muoto: "soita artistin <artistin nimi> kappale <kappaleen nimi>"
           - (sekoita|toista|kuuntele|soita) [ ](artistin|bändin|yhtyeen) {artist} (kappale|biisi|laulu)
             {media_name} [(huoneessa|soittimella|laitteella) {area_or_player_name}][ radiotilassa]
         artist_trigger:
@@ -157,10 +153,8 @@ blueprint:
               multiline: false
               multiple: true
           default:
-          # Muoto: "soita artisti <artistin nimi>"
           - (sekoita|toista|kuuntele|soita) [ ](artisti|bändi|yhtye) {media_name} [(huoneessa|soittimella|laitteella)
             {area_or_player_name}][ radiotilassa]
-          # Muoto: "soita musiikkia yhtyeeltä <yhtyeen nimi>"
           - (sekoita|toista|kuuntele|soita) [musiikkia] (artistilta|bändiltä|yhtyeeltä)
             {media_name} [(huoneessa|soittimella|laitteella) {area_or_player_name}][ radiotilassa]
         radio_trigger:
@@ -230,20 +224,40 @@ action:
       {{ area_entities(area_id(trigger.device_id)) | select('in', ma_players) | list }}
     mass_player_entity_id: >-
       {% set player_map = assistant_player_map %}
-      {% set entities = device_entities(trigger.device_id) or [] %}
       {% set mapped_player = namespace(id=none) %}
-      {% for entity in entities %}
+
+      {# --- Alkuperäinen logiikka: Etsitään suoraan laitteeseen liitettyjä entiteettejä (esim. assist_satellite) --- #}
+      {% set device_entities_list = device_entities(trigger.device_id) or [] %}
+      {% for entity in device_entities_list %}
         {% if entity in player_map and mapped_player.id == none %}
           {% set mapped_player.id = player_map[entity] %}
         {% endif %}
       {% endfor %}
+
+      {# --- Uusi logiikka: Jos yllä ei löytynyt osumaa, etsitään käyttäjän (person) kautta --- #}
+      {% if mapped_player.id == none and trigger.context.user_id is not none %}
+        {# Etsitään henkilö, joka vastaa komennon antanutta käyttäjää #}
+        {% set user_person = states.person | selectattr('attributes.user_id', 'eq', trigger.context.user_id) | first %}
+        {% if user_person %}
+          {# Haetaan henkilöön liitetyt device_trackerit #}
+          {% set person_trackers = user_person.attributes.device_trackers or [] %}
+          {# Tarkistetaan, löytyykö jokin tracker-entiteeteistä paritusmäärittelystä #}
+          {% for tracker in person_trackers %}
+            {% if tracker in player_map and mapped_player.id == none %}
+              {% set mapped_player.id = player_map[tracker] %}
+            {% endif %}
+          {% endfor %}
+        {% endif %}
+      {% endif %}
+
+      {# --- Lopullinen valinta ja varasoitin --- #}
       {% if mapped_player.id != none %}
         {{ [mapped_player.id] }}
       {% else %}
         {{ player_entity_id_by_player_name
-           or player_entity_id_by_area_name
-           or player_entity_id_by_assist_area
-           or [default_player_entity_id] }}
+            or player_entity_id_by_area_name
+            or player_entity_id_by_assist_area
+            or [default_player_entity_id] }}
       {% endif %}
     mass_player_name: "{{ mass_player_entity_id | map('state_attr', 'friendly_name') | join(', ') }}"
     action_data:
